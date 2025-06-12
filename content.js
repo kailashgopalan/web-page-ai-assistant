@@ -5,6 +5,7 @@ class WebPageAssistant {
     this.apiKey = null;
     this.pageContent = '';
     this.chatHistory = [];
+    this.darkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
     this.init();
   }
 
@@ -21,6 +22,9 @@ class WebPageAssistant {
       console.error('Please set your OpenAI API key in config.js');
       this.apiKey = null;
     }
+    
+    // Load theme preference
+    await this.loadThemePreference();
     
     // Load chat history from storage
     await this.loadChatHistory();
@@ -40,6 +44,18 @@ class WebPageAssistant {
         this.openChat();
       }
     });
+  }
+
+  async loadThemePreference() {
+    try {
+      const result = await chrome.storage.local.get(['ai_dark_mode']);
+      if (result.ai_dark_mode !== undefined) {
+        this.darkMode = result.ai_dark_mode;
+        document.documentElement.classList.toggle('ai-dark-mode', this.darkMode);
+      }
+    } catch (error) {
+      console.error('Error loading theme preference:', error);
+    }
   }
 
   async loadChatHistory() {
@@ -106,6 +122,7 @@ class WebPageAssistant {
         <div id="ai-chat-header">
           <h3>AI Page Assistant</h3>
           <div id="ai-chat-controls">
+            <button id="ai-theme-toggle" title="Toggle dark/light mode">🌓</button>
             <button id="ai-clear-chat" title="Clear conversation">🗑️</button>
             <button id="ai-chat-close">&times;</button>
           </div>
@@ -142,12 +159,14 @@ class WebPageAssistant {
     const toggle = document.getElementById('ai-chat-toggle');
     const closeBtn = document.getElementById('ai-chat-close');
     const clearBtn = document.getElementById('ai-clear-chat');
+    const themeBtn = document.getElementById('ai-theme-toggle');
     const sendBtn = document.getElementById('ai-chat-send');
     const input = document.getElementById('ai-chat-input');
 
     toggle.addEventListener('click', () => this.toggleChat());
     closeBtn.addEventListener('click', () => this.toggleChat());
     clearBtn.addEventListener('click', () => this.clearChatHistory());
+    themeBtn.addEventListener('click', () => this.toggleTheme());
     sendBtn.addEventListener('click', () => this.sendMessage());
     input.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') this.sendMessage();
@@ -557,6 +576,22 @@ Please answer questions about this webpage content in a helpful and concise mann
     } catch (error) {
       console.error('Error clearing chat history:', error);
     }
+  }
+
+  toggleTheme() {
+    this.darkMode = !this.darkMode;
+    document.documentElement.classList.toggle('ai-dark-mode', this.darkMode);
+    
+    // Save preference
+    try {
+      chrome.storage.local.set({ 'ai_dark_mode': this.darkMode });
+    } catch (error) {
+      console.error('Error saving theme preference:', error);
+    }
+    
+    // Update button text
+    const themeBtn = document.getElementById('ai-theme-toggle');
+    themeBtn.textContent = this.darkMode ? '☀️' : '🌓';
   }
 }
 
