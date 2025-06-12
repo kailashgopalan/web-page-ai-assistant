@@ -88,23 +88,87 @@ class WebPageAssistant {
   }
 
   extractPageContent() {
-    // Remove script and style elements
-    const clonedDoc = document.cloneNode(true);
-    const scripts = clonedDoc.querySelectorAll('script, style, nav, header, footer');
-    scripts.forEach(el => el.remove());
-    
-    // Get main content
-    const mainContent = clonedDoc.querySelector('main') || 
-                       clonedDoc.querySelector('article') || 
-                       clonedDoc.querySelector('.content') || 
-                       clonedDoc.querySelector('#content') || 
-                       clonedDoc.body;
-    
-    this.pageContent = mainContent ? mainContent.textContent.trim() : document.body.textContent.trim();
-    
-    // Limit content length to avoid token limits
-    if (this.pageContent.length > 8000) {
-      this.pageContent = this.pageContent.substring(0, 8000) + '...';
+    try {
+      console.log('Starting content extraction');
+      
+      // Create a deep clone of the document to avoid modifying the original
+      const clonedDoc = document.cloneNode(true);
+      
+      // Remove non-content elements
+      const elementsToRemove = clonedDoc.querySelectorAll('script, style, noscript, svg, iframe');
+      elementsToRemove.forEach(el => el.remove());
+      
+      // Try multiple strategies to find the main content
+      
+      // Strategy 1: Look for common content containers
+      let mainContent = clonedDoc.querySelector('main') || 
+                        clonedDoc.querySelector('article') || 
+                        clonedDoc.querySelector('[role="main"]') ||
+                        clonedDoc.querySelector('.main-content') ||
+                        clonedDoc.querySelector('.content') || 
+                        clonedDoc.querySelector('#content');
+      
+      // Strategy 2: For SPAs and modern sites (like OpenAI docs)
+      if (!mainContent || mainContent.textContent.trim().length < 100) {
+        console.log('Using strategy 2 for content extraction');
+        
+        // Look for div elements with substantial content
+        const divs = Array.from(clonedDoc.querySelectorAll('div'));
+        const contentDivs = divs.filter(div => {
+          const text = div.textContent.trim();
+          return text.length > 200 && div.querySelectorAll('p, h1, h2, h3, li').length > 3;
+        });
+        
+        // Sort by content length (descending)
+        contentDivs.sort((a, b) => b.textContent.length - a.textContent.length);
+        
+        // Use the div with the most content
+        if (contentDivs.length > 0) {
+          mainContent = contentDivs[0];
+        }
+      }
+      
+      // Strategy 3: Fallback to specific element types with substantial content
+      if (!mainContent || mainContent.textContent.trim().length < 100) {
+        console.log('Using strategy 3 for content extraction');
+        
+        const contentElements = [];
+        
+        // Collect headings and paragraphs
+        const headingsAndParagraphs = clonedDoc.querySelectorAll('h1, h2, h3, p, li, td');
+        headingsAndParagraphs.forEach(el => {
+          if (el.textContent.trim().length > 20) {
+            contentElements.push(el.textContent.trim());
+          }
+        });
+        
+        if (contentElements.length > 0) {
+          this.pageContent = contentElements.join('\n\n');
+          console.log(`Extracted ${contentElements.length} content elements`);
+        } else {
+          // Last resort: just use body text
+          this.pageContent = clonedDoc.body.textContent.trim();
+          console.log('Fallback to body text');
+        }
+      } else {
+        // Use the found main content
+        this.pageContent = mainContent.textContent.trim();
+        console.log(`Extracted content from ${mainContent.tagName}${mainContent.id ? '#'+mainContent.id : ''}${mainContent.className ? '.'+mainContent.className.split(' ')[0] : ''}`);
+      }
+      
+      // Add page title and URL for context
+      this.pageContent = `Page Title: ${document.title}\nURL: ${window.location.href}\n\nContent:\n${this.pageContent}`;
+      
+      // Limit content length to avoid token limits
+      if (this.pageContent.length > 10000) {
+        this.pageContent = this.pageContent.substring(0, 10000) + '... (content truncated)';
+      }
+      
+      console.log(`Final content length: ${this.pageContent.length} characters`);
+      
+    } catch (error) {
+      console.error('Error extracting page content:', error);
+      this.pageContent = `Failed to extract content: ${error.message}. Page title: ${document.title}`;
     }
   }
 
@@ -122,6 +186,7 @@ class WebPageAssistant {
         <div id="ai-chat-header">
           <h3>AI Page Assistant</h3>
           <div id="ai-chat-controls">
+            <button id="ai-reload-content" title="Reload page content">🔄</button>
             <button id="ai-theme-toggle" title="Toggle dark/light mode">🌓</button>
             <button id="ai-clear-chat" title="Clear conversation">🗑️</button>
             <button id="ai-chat-close">&times;</button>
@@ -160,6 +225,7 @@ class WebPageAssistant {
     const closeBtn = document.getElementById('ai-chat-close');
     const clearBtn = document.getElementById('ai-clear-chat');
     const themeBtn = document.getElementById('ai-theme-toggle');
+    const reloadBtn = document.getElementById('ai-reload-content');
     const sendBtn = document.getElementById('ai-chat-send');
     const input = document.getElementById('ai-chat-input');
 
@@ -167,6 +233,7 @@ class WebPageAssistant {
     closeBtn.addEventListener('click', () => this.toggleChat());
     clearBtn.addEventListener('click', () => this.clearChatHistory());
     themeBtn.addEventListener('click', () => this.toggleTheme());
+    reloadBtn.addEventListener('click', () => this.reloadContent());
     sendBtn.addEventListener('click', () => this.sendMessage());
     input.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') this.sendMessage();
@@ -463,6 +530,18 @@ class WebPageAssistant {
   }
 
   async callOpenAI(userMessage) {
+    // Check if we have content
+    if (!this.pageContent || this.pageContent.length < 50) {
+      console.warn('Page content is missing or too short, extracting again');
+      this.extractPageContent();
+    }
+    
+    // Add debug info about content length
+    const contentSummary = this.pageContent.length > 100 
+      ? `${this.pageContent.substring(0, 100)}... (${this.pageContent.length} chars total)`
+      : this.pageContent;
+    console.log('Content summary:', contentSummary);
+    
     const messages = [
       {
         role: 'system',
@@ -472,7 +551,9 @@ Title: ${document.title}
 URL: ${window.location.href}
 Content: ${this.pageContent}
 
-Please answer questions about this webpage content in a helpful and concise manner. If the user asks about something not related to the page content, politely redirect them to ask about the current page.`
+Please answer questions about this webpage content in a helpful and concise manner. If the user asks about something not related to the page content, politely redirect them to ask about the current page.
+
+If you don't see enough content to answer the question, explain that you might not have access to all the page content and suggest the user try refreshing the page or viewing a different section.`
       },
       ...this.chatHistory.slice(-10), // Keep last 10 messages for context
       {
@@ -592,6 +673,52 @@ Please answer questions about this webpage content in a helpful and concise mann
     // Update button text
     const themeBtn = document.getElementById('ai-theme-toggle');
     themeBtn.textContent = this.darkMode ? '☀️' : '🌓';
+  }
+
+  async reloadContent() {
+    try {
+      // Show loading message
+      const messagesContainer = document.getElementById('ai-chat-messages');
+      messagesContainer.innerHTML += `
+        <div class="ai-message">
+          <div class="ai-message-header">
+            <strong>System:</strong>
+          </div>
+          <div class="ai-message-content">🔄 Reloading page content...</div>
+        </div>
+      `;
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      
+      // Extract content again
+      this.extractPageContent();
+      
+      // Show success message
+      messagesContainer.innerHTML += `
+        <div class="ai-message">
+          <div class="ai-message-header">
+            <strong>System:</strong>
+          </div>
+          <div class="ai-message-content">✅ Content reloaded! Extracted ${this.pageContent.length} characters. You can now ask questions about the current page.</div>
+        </div>
+      `;
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      
+      console.log('Content reloaded manually');
+    } catch (error) {
+      console.error('Error reloading content:', error);
+      
+      // Show error message
+      const messagesContainer = document.getElementById('ai-chat-messages');
+      messagesContainer.innerHTML += `
+        <div class="ai-message">
+          <div class="ai-message-header">
+            <strong>System:</strong>
+          </div>
+          <div class="ai-message-content">❌ Error reloading content: ${error.message}</div>
+        </div>
+      `;
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
   }
 }
 
