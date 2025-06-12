@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Web Page AI Assistant",
+  "version": "1.0",
+  "description": "AI chatbot that helps you understand and learn from any webpage using OpenAI",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting",
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["config.js", "content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_end"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Web Page AI Assistant"
+  }
+} 
